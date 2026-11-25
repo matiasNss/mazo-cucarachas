@@ -22,6 +22,15 @@ button{font:700 1.1rem system-ui;padding:12px 32px;border:0;border-radius:8px;ba
 input{font:1rem system-ui;padding:9px 12px;border-radius:8px;border:2px solid var(--acento);background:var(--bg);color:var(--fg);text-align:center;width:min(240px,100%);box-sizing:border-box}
 h2{margin:0;font-size:1rem}
 #ranking{margin:0;padding-left:1.6em;text-align:left;font-variant-numeric:tabular-nums;line-height:1.6;overflow-wrap:anywhere}
+#tienda{position:absolute;inset:0;z-index:1;overflow-y:auto;background:var(--bg);padding:16px;text-align:center}
+#lista{display:grid;gap:10px;max-width:420px;margin:12px auto}
+.item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:2px solid #ffffff30;border-radius:10px;text-align:left}
+.item.puesto{border-color:var(--acento)}
+.item i{flex:none;width:34px;height:22px;border-radius:4px}
+.item div{flex:1;min-width:0;line-height:1.35}
+.item small{display:block}
+.item button{font-size:.85rem;padding:8px 12px}
+button:disabled{opacity:.45;cursor:default}
 </style>
 <div id="hud"><span id="pts">Puntos: 0</span><span id="vidas">Vidas: 3</span><span id="tiempo">Tiempo: 30</span><button id="mudo" aria-pressed="false">Sonido: sí</button></div>
 <div id="cancha">
@@ -31,8 +40,15 @@ h2{margin:0;font-size:1rem}
     <p id="msg">Pasa 3 niveles y vence al jefe de cada uno. Si una cucaracha se escapa, pierdes una vida. Toca los círculos para usar el mazo gigante (M) o el spray que congela (S).</p>
     <input id="nombre" maxlength="12" placeholder="Tu nombre" aria-label="Tu nombre">
     <button id="jugar">Jugar</button>
+    <button id="abrir">Tienda de mazos</button>
     <h2>Tabla de clasificación</h2>
     <ol id="ranking"></ol>
+  </div>
+  <div id="tienda" hidden>
+    <h1>Tienda de mazos</h1>
+    <p id="saldo" style="margin:8px auto"></p>
+    <div id="lista"></div>
+    <button id="cerrar">Volver</button>
   </div>
 </div>
 <script>
@@ -52,6 +68,29 @@ function pintarRanking(actual){
   $('ranking').replaceChildren(...filas.map(r=>{const li=document.createElement('li');li.textContent=r.puntos==null?r.nombre:`${r.nombre}: ${r.puntos} pts`+(r===actual?' ← tú':'');return li}));
 }
 pintarRanking();
+const MAZOS=[
+ {nombre:'Mazo de madera',precio:0,radio:42,dano:1,c:['#a9713c','#cd9559','#6e4522']},
+ {nombre:'Mazo de hierro',precio:500,radio:52,dano:1,c:['#6b7a83','#9fb0b9','#434e55']},
+ {nombre:'Mazo dorado',precio:1500,radio:58,dano:2,c:['#e6a812','#ffe066','#a87500']},
+ {nombre:'Mazo del trueno',precio:3500,radio:72,dano:3,c:['#3a56d4','#8fe3ff','#22307a']}];
+let tienda={monedas:0,tengo:[0],usa:0};
+try{const x=JSON.parse(localStorage.getItem('tienda'));if(x&&Array.isArray(x.tengo)&&MAZOS[x.usa])tienda=x}catch(e){}
+function guardarTienda(){try{localStorage.setItem('tienda',JSON.stringify(tienda))}catch(e){}}
+function pintarTienda(){
+  $('saldo').textContent='Tienes '+tienda.monedas+' monedas. Ganas 1 por cada punto al terminar la partida.';
+  $('lista').replaceChildren(...MAZOS.map((z,i)=>{
+    const d=document.createElement('div'),mio=tienda.tengo.includes(i),puesto=tienda.usa==i;
+    d.className='item'+(puesto?' puesto':'');
+    d.innerHTML=`<i style="background:${z.c[0]}"></i><div><b>${z.nombre}</b><small>Alcance ${z.radio} · Daño al jefe ${z.dano}</small><small>${mio?'Ya es tuyo':z.precio+' monedas'}</small></div><button></button>`;
+    const b=d.querySelector('button');
+    b.textContent=puesto?'En uso':mio?'Usar':'Comprar';
+    b.disabled=puesto||(!mio&&tienda.monedas<z.precio);
+    b.onclick=()=>{if(!mio){tienda.monedas-=z.precio;tienda.tengo.push(i)}tienda.usa=i;guardarTienda();pintarTienda()};
+    return d;
+  }));
+}
+$('abrir').onclick=()=>{pintarTienda();$('tienda').hidden=false};
+$('cerrar').onclick=()=>$('tienda').hidden=true;
 function dano(){rojo=1}
 function medir(){const r=cv.getBoundingClientRect(),d=devicePixelRatio||1;W=r.width;H=r.height;cv.width=W*d;cv.height=H*d;g.setTransform(d,0,0,d,0,0)}
 addEventListener('resize',medir);medir();
@@ -89,10 +128,11 @@ function empezar(){
 function fin(){
   activo=false;const nuevo=pts>record;if(nuevo){record=pts;try{localStorage.setItem('record',pts)}catch(e){}}
   $('titulo').textContent=vidas>0?'¡Ganaste! Casa limpia':'¡Te invadieron!';
-  $('msg').textContent=`Hiciste ${pts} puntos. ${nuevo?'¡Nuevo récord!':'Récord: '+record}`;
+  $('msg').textContent=`Hiciste ${pts} puntos y ganaste ${pts} monedas. ${nuevo?'¡Nuevo récord!':'Récord: '+record}`;
   const yo={nombre:$('nombre').value.trim()||'Anónimo',puntos:pts};
   if(pts>0){ranking=[...ranking,yo].sort((a,b)=>b.puntos-a.puntos).slice(0,5);try{localStorage.setItem('ranking',JSON.stringify(ranking));localStorage.setItem('nombre',$('nombre').value.trim())}catch(e){}}
   pintarRanking(yo);
+  tienda.monedas+=pts;guardarTienda();
   $('jugar').textContent='Jugar otra vez';$('menu').hidden=false;
 }
 $('jugar').onclick=empezar;
@@ -106,7 +146,7 @@ function aplastar(x,y,escala){
 }
 cv.addEventListener('pointerdown',e=>{
   mover(e);if(!activo)return;golpe=1;sonido(140,.15,'square');
-  const radio=gigante>0?85:42;
+  const z=MAZOS[tienda.usa],radio=gigante>0?Math.max(85,z.radio*1.4):z.radio;
   poderes=poderes.filter(p=>{
     if(Math.hypot(p.x-m.x,p.y-m.y)>40)return true;
     if(p.tipo=='M'){gigante=7;anunciar('¡Mazo gigante!')}else{hielo=4;anunciar('¡Spray congelante!')}
@@ -119,7 +159,7 @@ cv.addEventListener('pointerdown',e=>{
     aplastar(b.x,b.y,1);textos.push({x:b.x,y:b.y,s:'+'+p,vida:1});return false;
   });
   if(jefe&&Math.hypot(jefe.x-m.x,jefe.y-m.y)<radio+35){
-    n++;jefe.hp-=gigante>0?2:1;jefe.v+=4;jefe.a+=(Math.random()-.5)*1.4;pts+=15;
+    n++;jefe.hp=Math.max(0,jefe.hp-z.dano*(gigante>0?2:1));jefe.v+=4;jefe.a+=(Math.random()-.5)*1.4;pts+=15;
     textos.push({x:m.x,y:m.y,s:'¡PUM!',vida:.7});
     if(jefe.hp<=0){
       aplastar(jefe.x,jefe.y,2.6);pts+=200*(nivel+1);sonido(300,.8,'sawtooth');jefe=null;
@@ -150,9 +190,10 @@ function mazo(){
   g.save();g.translate(m.x+34,m.y+34);g.rotate(.55*(1-golpe)); // gira desde el final del mango
   g.rotate(-Math.PI/4);if(gigante>0)g.scale(1.8,1.8);
   g.fillStyle='#b9854f';g.fillRect(-5,-48,10,56);
-  g.fillStyle='#6b7a83';g.fillRect(-28,-66,56,32);
-  g.fillStyle='#9fb0b9';g.fillRect(-28,-66,56,7);
-  g.fillStyle='#434e55';g.fillRect(-28,-66,8,32);g.fillRect(20,-66,8,32);
+  const c=MAZOS[tienda.usa].c;
+  g.fillStyle=c[0];g.fillRect(-28,-66,56,32);
+  g.fillStyle=c[1];g.fillRect(-28,-66,56,7);
+  g.fillStyle=c[2];g.fillRect(-28,-66,8,32);g.fillRect(20,-66,8,32);
   g.restore();
 }
 let antes=performance.now();
