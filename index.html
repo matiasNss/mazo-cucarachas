@@ -1,4 +1,3 @@
-https://matiasnss.github.io/mazo-cucarachas/
 <!doctype html>
 <html lang="es">
 <meta charset="utf-8">
@@ -15,10 +14,14 @@ body{background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;displ
 #hud #mudo{font:600 .8rem system-ui;padding:4px 8px}
 #cancha{position:relative;flex:1;min-height:0}
 canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:none}
-#menu{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;padding:16px;background:var(--panel)}
+#menu{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:safe center;overflow-y:auto;text-align:center;gap:12px;padding:16px;background:var(--panel)}
 h1{margin:0;font-size:2rem;color:var(--acento);text-wrap:balance}
 p{margin:0;max-width:34ch;line-height:1.5}
 button{font:700 1.1rem system-ui;padding:12px 32px;border:0;border-radius:8px;background:var(--acento);color:#17252a;cursor:pointer}
+#menu>*{flex-shrink:0}
+input{font:1rem system-ui;padding:9px 12px;border-radius:8px;border:2px solid var(--acento);background:var(--bg);color:var(--fg);text-align:center;width:min(240px,100%);box-sizing:border-box}
+h2{margin:0;font-size:1rem}
+#ranking{margin:0;padding-left:1.6em;text-align:left;font-variant-numeric:tabular-nums;line-height:1.6;overflow-wrap:anywhere}
 </style>
 <div id="hud"><span id="pts">Puntos: 0</span><span id="vidas">Vidas: 3</span><span id="tiempo">Tiempo: 30</span><button id="mudo" aria-pressed="false">Sonido: sí</button></div>
 <div id="cancha">
@@ -26,7 +29,10 @@ button{font:700 1.1rem system-ui;padding:12px 32px;border:0;border-radius:8px;ba
   <div id="menu">
     <h1 id="titulo">Mazo contra Cucarachas</h1>
     <p id="msg">Pasa 3 niveles y vence al jefe de cada uno. Si una cucaracha se escapa, pierdes una vida. Toca los círculos para usar el mazo gigante (M) o el spray que congela (S).</p>
+    <input id="nombre" maxlength="12" placeholder="Tu nombre" aria-label="Tu nombre">
     <button id="jugar">Jugar</button>
+    <h2>Tabla de clasificación</h2>
+    <ol id="ranking"></ol>
   </div>
 </div>
 <script>
@@ -37,9 +43,16 @@ const NIVELES=[
  {nombre:'El basurero',a:'#8f8a6a',b:'#7d785b',l:'#5d5942',vel:44,vida:18}];
 const DUR=30;
 let nivel=0,jefe=null,poderes=[],trozos=[],gigante=0,hielo=0,aviso='',avisoT=0,proxPoder=7,mudo=false,compas=0,proxNota=0;
-let W,H,bichos=[],manchas=[],textos=[],pts,vidas,t,activo=false,prox=0,combo=0,golpe=0,temblor=0,record=0,audio;
+let W,H,bichos=[],manchas=[],textos=[],pts,vidas,t,activo=false,prox=0,combo=0,golpe=0,record=0,audio;
 let m={x:-200,y:-200};
-try{record=+localStorage.getItem('record')||0}catch(e){}
+let ranking=[],rojo=0;
+try{record=+localStorage.getItem('record')||0;const r=JSON.parse(localStorage.getItem('ranking'));if(Array.isArray(r))ranking=r;$('nombre').value=localStorage.getItem('nombre')||''}catch(e){}
+function pintarRanking(actual){
+  const filas=ranking.length?ranking:[{nombre:'Nadie todavía. ¡Juega!'}];
+  $('ranking').replaceChildren(...filas.map(r=>{const li=document.createElement('li');li.textContent=r.puntos==null?r.nombre:`${r.nombre}: ${r.puntos} pts`+(r===actual?' ← tú':'');return li}));
+}
+pintarRanking();
+function dano(){rojo=1}
 function medir(){const r=cv.getBoundingClientRect(),d=devicePixelRatio||1;W=r.width;H=r.height;cv.width=W*d;cv.height=H*d;g.setTransform(d,0,0,d,0,0)}
 addEventListener('resize',medir);medir();
 
@@ -71,12 +84,15 @@ function limpiar(){bichos=[];manchas=[];trozos=[];poderes=[];jefe=null;gigante=0
 function hud(){$('pts').textContent='Puntos: '+pts;$('vidas').textContent='Vidas: '+vidas;$('tiempo').textContent=jefe?'¡JEFE!':'Tiempo: '+Math.ceil(t)}
 function empezar(){
   try{audio=audio||new AudioContext();audio.resume()}catch(e){}
-  medir();nivel=0;textos=[];pts=0;vidas=3;combo=0;limpiar();activo=true;$('menu').hidden=true;hud();
+  medir();nivel=0;textos=[];pts=0;vidas=3;combo=0;rojo=0;limpiar();activo=true;$('menu').hidden=true;hud();
 }
 function fin(){
   activo=false;const nuevo=pts>record;if(nuevo){record=pts;try{localStorage.setItem('record',pts)}catch(e){}}
   $('titulo').textContent=vidas>0?'¡Ganaste! Casa limpia':'¡Te invadieron!';
   $('msg').textContent=`Hiciste ${pts} puntos. ${nuevo?'¡Nuevo récord!':'Récord: '+record}`;
+  const yo={nombre:$('nombre').value.trim()||'Anónimo',puntos:pts};
+  if(pts>0){ranking=[...ranking,yo].sort((a,b)=>b.puntos-a.puntos).slice(0,5);try{localStorage.setItem('ranking',JSON.stringify(ranking));localStorage.setItem('nombre',$('nombre').value.trim())}catch(e){}}
+  pintarRanking(yo);
   $('jugar').textContent='Jugar otra vez';$('menu').hidden=false;
 }
 $('jugar').onclick=empezar;
@@ -89,7 +105,7 @@ function aplastar(x,y,escala){
   for(let i=0;i<14*escala;i++){const a=Math.random()*7,v=80+Math.random()*220;trozos.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,giro:Math.random()*7,vida:.7,pata:i%3==0})}
 }
 cv.addEventListener('pointerdown',e=>{
-  mover(e);if(!activo)return;golpe=1;temblor=gigante>0?2:1;sonido(140,.15,'square');
+  mover(e);if(!activo)return;golpe=1;sonido(140,.15,'square');
   const radio=gigante>0?85:42;
   poderes=poderes.filter(p=>{
     if(Math.hypot(p.x-m.x,p.y-m.y)>40)return true;
@@ -103,10 +119,10 @@ cv.addEventListener('pointerdown',e=>{
     aplastar(b.x,b.y,1);textos.push({x:b.x,y:b.y,s:'+'+p,vida:1});return false;
   });
   if(jefe&&Math.hypot(jefe.x-m.x,jefe.y-m.y)<radio+35){
-    n++;jefe.hp-=gigante>0?2:1;jefe.v+=4;jefe.a+=(Math.random()-.5)*1.4;temblor=2;pts+=15;
+    n++;jefe.hp-=gigante>0?2:1;jefe.v+=4;jefe.a+=(Math.random()-.5)*1.4;pts+=15;
     textos.push({x:m.x,y:m.y,s:'¡PUM!',vida:.7});
     if(jefe.hp<=0){
-      aplastar(jefe.x,jefe.y,2.6);temblor=4;pts+=200*(nivel+1);sonido(300,.8,'sawtooth');jefe=null;
+      aplastar(jefe.x,jefe.y,2.6);pts+=200*(nivel+1);sonido(300,.8,'sawtooth');jefe=null;
       if(nivel==NIVELES.length-1){hud();fin();return}
       nivel++;vidas=Math.min(3,vidas+1);limpiar();
     }
@@ -157,7 +173,7 @@ function ciclo(ahora){
       const a=b.a+(b.vuela?Math.sin(b.fase*.35)*.9:0);
       b.x+=Math.cos(a)*b.v*paso;b.y+=Math.sin(a)*b.v*paso;b.fase+=paso*b.v*.25;
       if(b.x>0&&b.x<W&&b.y>0&&b.y<H)b.entro=true;
-      if(b.x<-40||b.x>W+40||b.y<-40||b.y>H+40){if(b.entro){vidas--;combo=0;sonido(220,.4,'triangle')}return false}
+      if(b.x<-40||b.x>W+40||b.y<-40||b.y>H+40){if(b.entro){vidas--;combo=0;dano();sonido(220,.4,'triangle')}return false}
       return true;
     });
     if(jefe){
@@ -165,13 +181,13 @@ function ciclo(ahora){
       // rebota a los lados y arriba; solo escapa por abajo
       if((jefe.x<50&&Math.cos(jefe.a)<0)||(jefe.x>W-50&&Math.cos(jefe.a)>0))jefe.a=Math.PI-jefe.a;
       if(jefe.y<50&&Math.sin(jefe.a)<0)jefe.a=-jefe.a;
-      if(jefe.y>H+80){vidas--;jefe.y=-70;jefe.a=Math.PI/2;sonido(220,.5,'triangle');anunciar('¡El jefe se escapó!')}
+      if(jefe.y>H+80){vidas--;dano();jefe.y=-70;jefe.a=Math.PI/2;sonido(220,.5,'triangle');anunciar('¡El jefe se escapó!')}
     }
     if(vidas<=0){vidas=0;hud();fin()}else hud();
   }
-  golpe=Math.max(0,golpe-dt*7);temblor=Math.max(0,temblor-dt*8);
-  g.save();g.translate((Math.random()-.5)*temblor*7,(Math.random()-.5)*temblor*7);
-  for(let y=0;y<H+80;y+=70)for(let x=0;x<W+80;x+=70){const N=NIVELES[nivel];g.fillStyle=(x+y)/70%2?N.b:N.a;g.fillRect(x-5,y-5,70,70);g.strokeStyle=N.l;g.strokeRect(x-5,y-5,70,70)}
+  golpe=Math.max(0,golpe-dt*7);rojo=Math.max(0,rojo-dt*2.5);
+  g.save();
+  for(let y=-70;y<H+140;y+=70)for(let x=-70;x<W+140;x+=70){const N=NIVELES[nivel];g.fillStyle=Math.abs((x+y)/70%2)?N.b:N.a;g.fillRect(x-5,y-5,70,70);g.strokeStyle=N.l;g.strokeRect(x-5,y-5,70,70)}
   manchas=manchas.filter(s=>{s.vida-=dt;g.globalAlpha=Math.max(0,Math.min(1,s.vida));g.fillStyle='#7d9c24';
     for(const[a,b,r]of s.gotas){g.beginPath();g.arc(s.x+a*.7,s.y+b*.7,r,0,7);g.fill()}g.globalAlpha=1;return s.vida>0});
   bichos.forEach(cucaracha);
@@ -191,6 +207,7 @@ function ciclo(ahora){
   if(activo&&combo>=5){g.fillStyle='#17252a';g.fillText('Combo x'+Math.min(5,1+(combo/5|0)),W/2,34)}
   if(activo&&avisoT>0){avisoT-=dt;g.font='900 26px system-ui';g.lineWidth=5;g.strokeStyle='#17252a';g.strokeText(aviso,W/2,H/2);g.fillStyle='#ffca3a';g.fillText(aviso,W/2,H/2)}
   mazo();g.restore();
+  if(rojo>0){g.fillStyle=`rgba(214,40,40,${rojo*.35})`;g.fillRect(0,0,W,H)}
   requestAnimationFrame(ciclo);
 }
 requestAnimationFrame(ciclo);
