@@ -1,0 +1,198 @@
+https://matiasnss.github.io/mazo-cucarachas/
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mazo contra Cucarachas</title>
+<style>
+/* Layout: marcador arriba, piso de baldosas como cancha. Un solo tema: cocina de noche */
+:root{--bg:#17252a;--fg:#f4f1de;--acento:#ffca3a;--panel:#0d171acc;color-scheme:dark}
+html,body{height:100%;margin:0}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden;user-select:none}
+#hud{display:flex;justify-content:space-between;gap:8px;padding:10px 16px;font-weight:700;font-variant-numeric:tabular-nums}
+#hud{align-items:center;flex-wrap:wrap}
+#hud #mudo{font:600 .8rem system-ui;padding:4px 8px}
+#cancha{position:relative;flex:1;min-height:0}
+canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:none}
+#menu{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;padding:16px;background:var(--panel)}
+h1{margin:0;font-size:2rem;color:var(--acento);text-wrap:balance}
+p{margin:0;max-width:34ch;line-height:1.5}
+button{font:700 1.1rem system-ui;padding:12px 32px;border:0;border-radius:8px;background:var(--acento);color:#17252a;cursor:pointer}
+</style>
+<div id="hud"><span id="pts">Puntos: 0</span><span id="vidas">Vidas: 3</span><span id="tiempo">Tiempo: 30</span><button id="mudo" aria-pressed="false">Sonido: sí</button></div>
+<div id="cancha">
+  <canvas id="c"></canvas>
+  <div id="menu">
+    <h1 id="titulo">Mazo contra Cucarachas</h1>
+    <p id="msg">Pasa 3 niveles y vence al jefe de cada uno. Si una cucaracha se escapa, pierdes una vida. Toca los círculos para usar el mazo gigante (M) o el spray que congela (S).</p>
+    <button id="jugar">Jugar</button>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id), cv=$('c'), g=cv.getContext('2d');
+const NIVELES=[
+ {nombre:'La cocina',a:'#e2dcc8',b:'#cfc8b2',l:'#a59e89',vel:0,vida:8},
+ {nombre:'El baño',a:'#cfe8ec',b:'#aed3da',l:'#7fa9b2',vel:22,vida:12},
+ {nombre:'El basurero',a:'#8f8a6a',b:'#7d785b',l:'#5d5942',vel:44,vida:18}];
+const DUR=30;
+let nivel=0,jefe=null,poderes=[],trozos=[],gigante=0,hielo=0,aviso='',avisoT=0,proxPoder=7,mudo=false,compas=0,proxNota=0;
+let W,H,bichos=[],manchas=[],textos=[],pts,vidas,t,activo=false,prox=0,combo=0,golpe=0,temblor=0,record=0,audio;
+let m={x:-200,y:-200};
+try{record=+localStorage.getItem('record')||0}catch(e){}
+function medir(){const r=cv.getBoundingClientRect(),d=devicePixelRatio||1;W=r.width;H=r.height;cv.width=W*d;cv.height=H*d;g.setTransform(d,0,0,d,0,0)}
+addEventListener('resize',medir);medir();
+
+function sonido(f,dur,tipo){if(!audio||mudo)return;const o=audio.createOscillator(),v=audio.createGain(),n=audio.currentTime;
+o.type=tipo;o.frequency.setValueAtTime(f,n);o.frequency.exponentialRampToValueAtTime(40,n+dur);
+v.gain.setValueAtTime(.2,n);v.gain.exponentialRampToValueAtTime(.001,n+dur);o.connect(v).connect(audio.destination);o.start();o.stop(n+dur)}
+
+function musica(dt){
+  proxNota-=dt;if(proxNota>0||!audio||mudo)return;
+  proxNota=jefe?.14:.24-nivel*.02;
+  const notas=jefe?[110,110,131,110,147,110,156,147]:[131,165,196,165,147,175,220,175];
+  const o=audio.createOscillator(),v=audio.createGain(),n=audio.currentTime;
+  o.type='square';o.frequency.value=notas[compas++%8]*(1+nivel*.12);
+  v.gain.setValueAtTime(.04,n);v.gain.exponentialRampToValueAtTime(.001,n+.13);o.connect(v).connect(audio.destination);o.start();o.stop(n+.14);
+}
+function anunciar(s){aviso=s;avisoT=2.2}
+function nueva(){
+  const lado=Math.random()*4|0, x=lado==0?-30:lado==1?W+30:Math.random()*W, y=lado==2?-30:lado==3?H+30:Math.random()*H;
+  const a=Math.atan2(H*(.25+Math.random()*.5)-y,W*(.25+Math.random()*.5)-x), r=Math.random();
+  const oro=r<.08, vuela=!oro&&r<.2+nivel*.08&&(nivel>0||t<DUR-8);
+  bichos.push({x,y,a,oro,vuela,v:(70+NIVELES[nivel].vel+(DUR-t)*2+Math.random()*40)*(oro?1.6:vuela?1.15:1),fase:Math.random()*9,entro:false});
+}
+function salirJefe(){
+  const hp=NIVELES[nivel].vida;
+  jefe={x:W/2,y:-70,a:Math.PI/2,hp,max:hp,fase:0,v:55+nivel*15};
+  anunciar('¡Llegó el jefe!');sonido(90,.9,'sawtooth');
+}
+function limpiar(){bichos=[];manchas=[];trozos=[];poderes=[];jefe=null;gigante=0;hielo=0;t=DUR;prox=1;proxPoder=7;anunciar('Nivel '+(nivel+1)+': '+NIVELES[nivel].nombre)}
+function hud(){$('pts').textContent='Puntos: '+pts;$('vidas').textContent='Vidas: '+vidas;$('tiempo').textContent=jefe?'¡JEFE!':'Tiempo: '+Math.ceil(t)}
+function empezar(){
+  try{audio=audio||new AudioContext();audio.resume()}catch(e){}
+  medir();nivel=0;textos=[];pts=0;vidas=3;combo=0;limpiar();activo=true;$('menu').hidden=true;hud();
+}
+function fin(){
+  activo=false;const nuevo=pts>record;if(nuevo){record=pts;try{localStorage.setItem('record',pts)}catch(e){}}
+  $('titulo').textContent=vidas>0?'¡Ganaste! Casa limpia':'¡Te invadieron!';
+  $('msg').textContent=`Hiciste ${pts} puntos. ${nuevo?'¡Nuevo récord!':'Récord: '+record}`;
+  $('jugar').textContent='Jugar otra vez';$('menu').hidden=false;
+}
+$('jugar').onclick=empezar;
+$('mudo').onclick=()=>{mudo=!mudo;$('mudo').textContent='Sonido: '+(mudo?'no':'sí');$('mudo').setAttribute('aria-pressed',mudo)};
+
+function mover(e){const r=cv.getBoundingClientRect();m={x:e.clientX-r.left,y:e.clientY-r.top}}
+cv.addEventListener('pointermove',mover);
+function aplastar(x,y,escala){
+  manchas.push({x,y,vida:6,gotas:Array.from({length:18},()=>[(Math.random()-.5)*80*escala,(Math.random()-.5)*80*escala,(2+Math.random()*8)*escala])});
+  for(let i=0;i<14*escala;i++){const a=Math.random()*7,v=80+Math.random()*220;trozos.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,giro:Math.random()*7,vida:.7,pata:i%3==0})}
+}
+cv.addEventListener('pointerdown',e=>{
+  mover(e);if(!activo)return;golpe=1;temblor=gigante>0?2:1;sonido(140,.15,'square');
+  const radio=gigante>0?85:42;
+  poderes=poderes.filter(p=>{
+    if(Math.hypot(p.x-m.x,p.y-m.y)>40)return true;
+    if(p.tipo=='M'){gigante=7;anunciar('¡Mazo gigante!')}else{hielo=4;anunciar('¡Spray congelante!')}
+    sonido(900,.35,'triangle');return false;
+  });
+  let n=0;
+  bichos=bichos.filter(b=>{
+    if(Math.hypot(b.x-m.x,b.y-m.y)>radio)return true;
+    n++;combo++;const p=(b.oro?50:b.vuela?25:10)*Math.min(5,1+(combo/5|0));pts+=p;
+    aplastar(b.x,b.y,1);textos.push({x:b.x,y:b.y,s:'+'+p,vida:1});return false;
+  });
+  if(jefe&&Math.hypot(jefe.x-m.x,jefe.y-m.y)<radio+35){
+    n++;jefe.hp-=gigante>0?2:1;jefe.v+=4;jefe.a+=(Math.random()-.5)*1.4;temblor=2;pts+=15;
+    textos.push({x:m.x,y:m.y,s:'¡PUM!',vida:.7});
+    if(jefe.hp<=0){
+      aplastar(jefe.x,jefe.y,2.6);temblor=4;pts+=200*(nivel+1);sonido(300,.8,'sawtooth');jefe=null;
+      if(nivel==NIVELES.length-1){hud();fin();return}
+      nivel++;vidas=Math.min(3,vidas+1);limpiar();
+    }
+  }
+  if(n)sonido(500,.2,'sawtooth');else combo=0;
+  hud();
+});
+
+function cucaracha(b){
+  g.save();g.translate(b.x,b.y);
+  if(b.vuela){g.fillStyle='#0003';g.beginPath();g.ellipse(8,24,18,8,0,0,7);g.fill()}
+  g.rotate(b.a);if(b.escala)g.scale(b.escala,b.escala);
+  g.strokeStyle='#2b160b';g.lineWidth=2.5;g.lineCap='round';
+  for(let i=-1;i<=1;i++)for(const s of[-1,1]){const k=Math.sin(b.fase+i*2+s)*5;g.beginPath();g.moveTo(i*8,s*8);g.lineTo(i*11+k,s*19);g.lineTo(i*16+k,s*24);g.stroke()}
+  g.lineWidth=1.5;for(const s of[-1,1]){g.beginPath();g.moveTo(22,s*3);g.quadraticCurveTo(38,s*6,42,s*(18+Math.sin(b.fase)*3));g.stroke()}
+  const ovalo=(x,y,rx,ry,c)=>{g.fillStyle=c;g.beginPath();g.ellipse(x,y,rx,ry,0,0,7);g.fill()};
+  ovalo(-4,0,21,12,b.oro?'#e6a812':'#7a3e1d');ovalo(13,0,8,9,b.oro?'#c68a00':'#592a12');ovalo(22,0,5,5,'#2b160b');
+  ovalo(-6,-5,12,2.5,'#ffffff40');
+  g.strokeStyle='#2b160b';g.beginPath();g.moveTo(-24,0);g.lineTo(8,0);g.stroke();
+  if(b.vuela){const al=.45+Math.sin(b.fase*3)*.35;for(const s of[-1,1]){g.save();g.rotate(s*al);ovalo(-8,s*17,20,8,'#ffffffa0');g.restore()}}
+  if(b.escala){ovalo(23,-3,1.8,1.8,'#ff3b1f');ovalo(23,3,1.8,1.8,'#ff3b1f')}
+  g.restore();
+}
+function mazo(){
+  g.save();g.translate(m.x+34,m.y+34);g.rotate(.55*(1-golpe)); // gira desde el final del mango
+  g.rotate(-Math.PI/4);if(gigante>0)g.scale(1.8,1.8);
+  g.fillStyle='#b9854f';g.fillRect(-5,-48,10,56);
+  g.fillStyle='#6b7a83';g.fillRect(-28,-66,56,32);
+  g.fillStyle='#9fb0b9';g.fillRect(-28,-66,56,7);
+  g.fillStyle='#434e55';g.fillRect(-28,-66,8,32);g.fillRect(20,-66,8,32);
+  g.restore();
+}
+let antes=performance.now();
+function ciclo(ahora){
+  const dt=Math.min(.05,(ahora-antes)/1000);antes=ahora;
+  if(activo){
+    musica(dt);
+    gigante=Math.max(0,gigante-dt);hielo=Math.max(0,hielo-dt);
+    const paso=hielo>0?0:dt;
+    if(!jefe){t-=paso;if(t<=0){t=0;salirJefe()}}
+    prox-=paso;
+    if(prox<=0){nueva();prox=jefe?2.2:Math.max(.4,1.1-nivel*.12-(DUR-t)*.012)}
+    proxPoder-=dt;
+    if(proxPoder<=0){poderes.push({x:50+Math.random()*(W-100),y:70+Math.random()*(H-140),tipo:Math.random()<.5?'M':'S',vida:5});proxPoder=9+Math.random()*5}
+    poderes=poderes.filter(p=>(p.vida-=dt)>0);
+    bichos=bichos.filter(b=>{
+      if(b.entro)b.a+=(Math.random()-.5)*paso*5;
+      const a=b.a+(b.vuela?Math.sin(b.fase*.35)*.9:0);
+      b.x+=Math.cos(a)*b.v*paso;b.y+=Math.sin(a)*b.v*paso;b.fase+=paso*b.v*.25;
+      if(b.x>0&&b.x<W&&b.y>0&&b.y<H)b.entro=true;
+      if(b.x<-40||b.x>W+40||b.y<-40||b.y>H+40){if(b.entro){vidas--;combo=0;sonido(220,.4,'triangle')}return false}
+      return true;
+    });
+    if(jefe){
+      jefe.a+=(Math.random()-.5)*paso*2;jefe.x+=Math.cos(jefe.a)*jefe.v*paso;jefe.y+=Math.sin(jefe.a)*jefe.v*paso;jefe.fase+=paso*jefe.v*.15;
+      // rebota a los lados y arriba; solo escapa por abajo
+      if((jefe.x<50&&Math.cos(jefe.a)<0)||(jefe.x>W-50&&Math.cos(jefe.a)>0))jefe.a=Math.PI-jefe.a;
+      if(jefe.y<50&&Math.sin(jefe.a)<0)jefe.a=-jefe.a;
+      if(jefe.y>H+80){vidas--;jefe.y=-70;jefe.a=Math.PI/2;sonido(220,.5,'triangle');anunciar('¡El jefe se escapó!')}
+    }
+    if(vidas<=0){vidas=0;hud();fin()}else hud();
+  }
+  golpe=Math.max(0,golpe-dt*7);temblor=Math.max(0,temblor-dt*8);
+  g.save();g.translate((Math.random()-.5)*temblor*7,(Math.random()-.5)*temblor*7);
+  for(let y=0;y<H+80;y+=70)for(let x=0;x<W+80;x+=70){const N=NIVELES[nivel];g.fillStyle=(x+y)/70%2?N.b:N.a;g.fillRect(x-5,y-5,70,70);g.strokeStyle=N.l;g.strokeRect(x-5,y-5,70,70)}
+  manchas=manchas.filter(s=>{s.vida-=dt;g.globalAlpha=Math.max(0,Math.min(1,s.vida));g.fillStyle='#7d9c24';
+    for(const[a,b,r]of s.gotas){g.beginPath();g.arc(s.x+a*.7,s.y+b*.7,r,0,7);g.fill()}g.globalAlpha=1;return s.vida>0});
+  bichos.forEach(cucaracha);
+  if(jefe){
+    cucaracha({...jefe,escala:2.8});
+    g.fillStyle='#17252a';g.fillRect(W/2-90,50,180,14);g.fillStyle='#d62828';g.fillRect(W/2-87,53,174*jefe.hp/jefe.max,8);
+  }
+  for(const p of poderes){
+    g.fillStyle=p.tipo=='M'?'#ffca3a':'#4cc9f0';g.beginPath();g.arc(p.x,p.y,23+Math.sin(ahora/120)*3,0,7);g.fill();
+    g.fillStyle='#17252a';g.font='900 24px system-ui';g.textAlign='center';g.fillText(p.tipo,p.x,p.y+8);
+  }
+  trozos=trozos.filter(p=>{p.vida-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.94;p.vy*=.94;p.giro+=dt*14;
+    g.save();g.translate(p.x,p.y);g.rotate(p.giro);g.fillStyle=p.pata?'#2b160b':'#a4c639';g.fillRect(-5,-2,p.pata?14:7,p.pata?3:6);g.restore();return p.vida>0});
+  if(hielo>0){g.fillStyle='#8fd8ff55';g.fillRect(-10,-10,W+20,H+20)}
+  g.font='900 24px system-ui';g.textAlign='center';
+  textos=textos.filter(x=>{x.vida-=dt;x.y-=40*dt;g.fillStyle='#b3261e';g.fillText(x.s,x.x,x.y);return x.vida>0});
+  if(activo&&combo>=5){g.fillStyle='#17252a';g.fillText('Combo x'+Math.min(5,1+(combo/5|0)),W/2,34)}
+  if(activo&&avisoT>0){avisoT-=dt;g.font='900 26px system-ui';g.lineWidth=5;g.strokeStyle='#17252a';g.strokeText(aviso,W/2,H/2);g.fillStyle='#ffca3a';g.fillText(aviso,W/2,H/2)}
+  mazo();g.restore();
+  requestAnimationFrame(ciclo);
+}
+requestAnimationFrame(ciclo);
+</script>
+</html>
