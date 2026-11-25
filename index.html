@@ -40,6 +40,7 @@ button:disabled{opacity:.45;cursor:default}
     <p id="msg">Pasa 3 niveles y vence al jefe de cada uno. Si una cucaracha se escapa, pierdes una vida. Toca los círculos para usar el mazo gigante (M) o el spray que congela (S).</p>
     <input id="nombre" maxlength="12" placeholder="Tu nombre" aria-label="Tu nombre">
     <button id="jugar">Jugar</button>
+    <button id="volver" hidden>Ir al menú</button>
     <button id="abrir">Tienda de mazos</button>
     <h2>Tabla de clasificación</h2>
     <ol id="ranking"></ol>
@@ -133,9 +134,14 @@ function fin(){
   if(pts>0){ranking=[...ranking,yo].sort((a,b)=>b.puntos-a.puntos).slice(0,5);try{localStorage.setItem('ranking',JSON.stringify(ranking));localStorage.setItem('nombre',$('nombre').value.trim())}catch(e){}}
   pintarRanking(yo);
   tienda.monedas+=pts;guardarTienda();
-  $('jugar').textContent='Jugar otra vez';$('menu').hidden=false;
+  $('jugar').textContent='Jugar otra vez';$('volver').hidden=false;$('menu').hidden=false;
 }
 $('jugar').onclick=empezar;
+const inicio={titulo:$('titulo').textContent,msg:$('msg').textContent};
+$('volver').onclick=()=>{
+  nivel=0;pts=0;vidas=3;combo=0;textos=[];rojo=0;limpiar();avisoT=0;hud();pintarRanking();
+  $('titulo').textContent=inicio.titulo;$('msg').textContent=inicio.msg;$('jugar').textContent='Jugar';$('volver').hidden=true;$('menu').scrollTop=0;
+};
 $('mudo').onclick=()=>{mudo=!mudo;$('mudo').textContent='Sonido: '+(mudo?'no':'sí');$('mudo').setAttribute('aria-pressed',mudo)};
 
 function mover(e){const r=cv.getBoundingClientRect();m={x:e.clientX-r.left,y:e.clientY-r.top}}
